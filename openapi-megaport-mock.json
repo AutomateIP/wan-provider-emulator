@@ -1,0 +1,336 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Megaport API (Mock)",
+    "description": "Mock simulation of the Megaport REST API for the circuit scaling demo. Implements VXC speed change (synchronous), VXC status retrieval, and the OpenMetrics/Prometheus utilization endpoint. Response schemas match the real Megaport API exactly.\n",
+    "version": "3.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000",
+      "description": "Mock server (base path /megaport)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "VXC Management",
+      "description": "Create and modify Virtual Cross Connects"
+    },
+    {
+      "name": "Monitoring",
+      "description": "Service utilization and operational status"
+    }
+  ],
+  "paths": {
+    "/megaport/v3/product/vxc/{productUid}": {
+      "put": {
+        "operationId": "updateVxcRateLimit",
+        "summary": "Update VXC bandwidth (rateLimit)",
+        "description": "Changes the speed of an existing VXC. This is a synchronous operation \u2014 the 200 response confirms the change is applied. Use this to scale a circuit up or down. Only the fields you include are updated; omit all others. To change speed only, send {\"rateLimit\": <mbps>}.\n",
+        "tags": [
+          "VXC Management"
+        ],
+        "parameters": [
+          {
+            "name": "productUid",
+            "in": "path",
+            "required": true,
+            "description": "UUID of the VXC to update (Megaport productUid)",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "a49cf3f1-20a1-4390-93aa-5005bdafe3d7"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VxcUpdateRequest"
+              },
+              "examples": {
+                "scaleUp": {
+                  "summary": "Scale circuit from 1 Gbps to 5 Gbps",
+                  "value": {
+                    "rateLimit": 5000
+                  }
+                },
+                "scaleDown": {
+                  "summary": "Revert circuit to 1 Gbps",
+                  "value": {
+                    "rateLimit": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "VXC updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VxcUpdateResponse"
+                },
+                "example": {
+                  "message": "VXC [a49cf3f1-20a1-4390-93aa-5005bdafe3d7] updated.",
+                  "terms": "This data is subject to the Acceptable Use Policy",
+                  "data": {
+                    "productUid": "a49cf3f1-20a1-4390-93aa-5005bdafe3d7",
+                    "productName": "corp-ord-nyc-01",
+                    "productType": "VXC",
+                    "rateLimit": 5000,
+                    "maximumRate": 10000,
+                    "provisioningStatus": "CONFIGURED",
+                    "up": true,
+                    "liveDate": "2026-01-01T00:00:00Z",
+                    "createDate": "2025-06-01T00:00:00Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request \u2014 missing or invalid rateLimit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "VXC not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "rateLimit exceeds maximum path capacity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "message": "Validation failed",
+                  "terms": "This data is subject to the Acceptable Use Policy",
+                  "data": "Requested rate limit 99999 exceeds maximum path capacity 10000"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/megaport/v2/product/{productUid}": {
+      "get": {
+        "operationId": "getVxcStatus",
+        "summary": "Get VXC status and current rateLimit",
+        "description": "Returns the current state of a VXC including its speed (rateLimit), provisioning status, and operational up/down status. Use this to confirm a speed change took effect or to read the current configured bandwidth before deciding on a scale action.\n",
+        "tags": [
+          "VXC Management"
+        ],
+        "parameters": [
+          {
+            "name": "productUid",
+            "in": "path",
+            "required": true,
+            "description": "UUID of the VXC to query",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "a49cf3f1-20a1-4390-93aa-5005bdafe3d7"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "VXC details returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VxcUpdateResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "VXC not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/megaport/v1/openmetrics": {
+      "get": {
+        "operationId": "getOpenMetrics",
+        "summary": "Get Prometheus/OpenMetrics utilization data for all VXCs",
+        "description": "Returns Prometheus text exposition format (OpenMetrics) containing cumulative byte and packet counters for all Megaport VXC services. Counters are cumulative \u2014 to derive utilization percentage, compute the delta between two scrapes and compare against the rateLimit: utilization_pct = (delta_receive_bytes * 8 / interval_seconds) / (rateLimit * 1_000_000) * 100. Recommended scrape interval: 5 minutes. The megaport_service_up gauge indicates whether the VXC is operationally active.\n",
+        "tags": [
+          "Monitoring"
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenMetrics text exposition",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "# HELP megaport_service_receive_bytes_total Total bytes received\n# TYPE megaport_service_receive_bytes_total counter\nmegaport_service_receive_bytes_total{service_uid=\"a49cf3f1-...\",service_type=\"VXC\",service_name=\"corp-ord-nyc-01\"} 5497558138\n# HELP megaport_service_transmit_bytes_total Total bytes transmitted\n# TYPE megaport_service_transmit_bytes_total counter\nmegaport_service_transmit_bytes_total{service_uid=\"a49cf3f1-...\",service_type=\"VXC\",service_name=\"corp-ord-nyc-01\"} 4831838208\n# HELP megaport_service_up Operational status of the service (1=up, 0=down)\n# TYPE megaport_service_up gauge\nmegaport_service_up{service_uid=\"a49cf3f1-...\",service_type=\"VXC\",service_name=\"corp-ord-nyc-01\"} 1\n# EOF\n"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "VxcUpdateRequest": {
+        "type": "object",
+        "description": "Partial update body for a VXC. Only include the fields you want to change. For a bandwidth-only change, send only rateLimit.\n",
+        "properties": {
+          "rateLimit": {
+            "type": "integer",
+            "description": "New VXC speed in Mbps. Must be a positive integer not exceeding the port's maximumRate. Common values: 100, 500, 1000, 5000, 10000.\n",
+            "minimum": 1,
+            "example": 5000
+          },
+          "name": {
+            "type": "string",
+            "description": "New display name for the VXC",
+            "example": "corp-ord-nyc-01-updated"
+          },
+          "shutdown": {
+            "type": "boolean",
+            "description": "Set to true to administratively disable the VXC",
+            "default": false
+          }
+        }
+      },
+      "VxcData": {
+        "type": "object",
+        "properties": {
+          "productUid": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the VXC"
+          },
+          "productName": {
+            "type": "string",
+            "description": "Display name"
+          },
+          "productType": {
+            "type": "string",
+            "enum": [
+              "VXC"
+            ]
+          },
+          "rateLimit": {
+            "type": "integer",
+            "description": "Current speed in Mbps"
+          },
+          "maximumRate": {
+            "type": "integer",
+            "description": "Maximum allowed speed for this VXC (port capacity cap) in Mbps"
+          },
+          "provisioningStatus": {
+            "type": "string",
+            "description": "Current provisioning state",
+            "enum": [
+              "NEW",
+              "DESIGN",
+              "DEPLOYABLE",
+              "CONFIGURED",
+              "LIVE",
+              "CANCELLED",
+              "DECOMMISSIONED",
+              "FAILED"
+            ]
+          },
+          "up": {
+            "type": "boolean",
+            "description": "Whether the VXC is operationally active"
+          },
+          "liveDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createDate": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VxcUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Human-readable status message"
+          },
+          "terms": {
+            "type": "string",
+            "description": "Megaport acceptable use policy boilerplate"
+          },
+          "data": {
+            "$ref": "#/components/schemas/VxcData"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Error description"
+          },
+          "terms": {
+            "type": "string"
+          },
+          "data": {
+            "description": "Additional error detail (string or null)",
+            "nullable": true,
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "OAuth2 Bearer token obtained from https://auth-m2m.megaport.com/oauth2/token"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
