@@ -93,12 +93,12 @@ curl -X POST $BASE/mock/reset
 
 | circuit_id | provider | name | bandwidth | max | utilization |
 |------------|----------|------|-----------|-----|-------------|
-| `a49cf3f1-20a1-4390-93aa-5005bdafe3d7` | megaport | corp-ord-nyc-01    | 1000 Mbps | 10000 | 40% |
+| `a49cf3f1-20a1-4390-93aa-5005bdafe3d7` | megaport | corp-ord-nyc-01    | 1000 Mbps | 10000 | 91% |
 | `b72ef8c2-31b2-5501-a4bb-6116cebf4e48` | megaport | corp-dfw-lax-01    | 1000 Mbps | 10000 | 40% |
-| `c14a2b3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d` | megaport | corp-sea-chi-01    | 500 Mbps  | 5000  | 62% |
+| `c14a2b3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d` | megaport | corp-sea-chi-01    | 500 Mbps  | 5000  | 88% |
 | `d25b3c4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e` | megaport | corp-mia-nyc-01    | 2000 Mbps | 10000 | 28% |
 | `3a58dd05-f46d-4b1d-a154-2e85c396ea62` | equinix  | corp-eqx-chi-ny-01 | 1000 Mbps | 10000 | 40% |
-| `e36c4d5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f` | equinix  | corp-eqx-sv-la-01  | 500 Mbps  | 5000  | 55% |
+| `e36c4d5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f` | equinix  | corp-eqx-sv-la-01  | 500 Mbps  | 5000  | 93% |
 | `f47d5e6a-7b8c-9d0e-1f2a-3b4c5d6e7f8a` | equinix  | corp-eqx-dc-ny-01  | 2000 Mbps | 10000 | 33% |
 
 All circuits reset to these values on `POST /mock/reset`.
