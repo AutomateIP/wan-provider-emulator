@@ -1,0 +1,10 @@
+services:
+  wan-provider-emulator:
+    image: wan-provider-emulator:latest
+    container_name: wan-provider-emulator
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MEGAPORT_DELAY_SECONDS: "1"
+      EQUINIX_POLL_ROUNDS: "3"
+      PORT: "5000"

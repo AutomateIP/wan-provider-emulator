@@ -1,0 +1,433 @@
+openapi: 3.0.3
+info:
+  title: Equinix Fabric v4 API (Mock)
+  description: >
+    Mock simulation of the Equinix Fabric v4 REST API for the circuit
+    scaling demo. Implements connection bandwidth change (asynchronous — 202 +
+    poll pattern), connection status retrieval, and connection statistics
+    (bandwidth utilization). Response schemas match the real Equinix Fabric v4
+    OpenAPI spec v4.15 exactly. Note: the bandwidth PATCH uses JSON Patch format
+    (RFC 6902) with Content-Type application/json-patch+json.
+  version: "4.15"
+
+servers:
+  - url: http://localhost:5000
+    description: Mock server (base path /equinix)
+
+tags:
+  - name: Connections
+    description: Manage Equinix Fabric virtual connections
+  - name: Statistics
+    description: Connection bandwidth utilization metrics
+
+paths:
+
+  /equinix/fabric/v4/connections/{connectionId}:
+    patch:
+      operationId: updateConnectionBandwidth
+      summary: Change connection bandwidth (async)
+      description: >
+        Changes the bandwidth of an existing Equinix Fabric connection using
+        JSON Patch (RFC 6902). This is an asynchronous operation — the 202
+        response means the request was accepted, not that the change is complete.
+        Poll GET /equinix/fabric/v4/connections/{connectionId} and check
+        operation.equinixStatus until it equals "PROVISIONED" (success) or
+        "FAILED" (error). Valid bandwidth values in Mbps: 10, 50, 100, 200,
+        500, 1000, 2000, 5000, 10000, 25000, 50000, 100000.
+      tags:
+        - Connections
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          description: UUID of the Equinix Fabric connection to update
+          schema:
+            type: string
+            format: uuid
+            example: 3a58dd05-f46d-4b1d-a154-2e85c396ea62
+      requestBody:
+        required: true
+        content:
+          application/json-patch+json:
+            schema:
+              $ref: '#/components/schemas/JsonPatchRequest'
+            examples:
+              scaleUpTo5Gbps:
+                summary: Scale connection from 1 Gbps to 5 Gbps
+                value:
+                  - op: replace
+                    path: /bandwidth
+                    value: 5000
+              revertTo1Gbps:
+                summary: Revert connection to 1 Gbps
+                value:
+                  - op: replace
+                    path: /bandwidth
+                    value: 1000
+      responses:
+        '202':
+          description: >
+            Bandwidth change request accepted. The change is being provisioned
+            asynchronously. Poll GET /connections/{connectionId} until
+            operation.equinixStatus = PROVISIONED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionResponse'
+              example:
+                uuid: "3a58dd05-f46d-4b1d-a154-2e85c396ea62"
+                name: "corp-eqx-chi-ny-01"
+                type: "EVPL_VC"
+                bandwidth: 5000
+                operation:
+                  equinixStatus: PROVISIONING
+                  providerStatus: PROVISIONING
+                changeLog:
+                  updatedDateTime: "2026-06-15T12:00:00Z"
+        '400':
+          description: Malformed JSON Patch body or missing /bandwidth operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Bandwidth value not supported or exceeds port capacity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                errorCode: INVALID_BANDWIDTH
+                message: "Requested bandwidth 99999 is not supported. Valid values (Mbps): [10, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 25000, 50000, 100000]"
+
+    get:
+      operationId: getConnection
+      summary: Get connection status and current bandwidth
+      description: >
+        Returns the current state of an Equinix Fabric connection including
+        bandwidth, provisioning status, and operation status fields. Use this
+        to poll for completion after a PATCH bandwidth change. The change is
+        complete when operation.equinixStatus equals "PROVISIONED". If
+        operation.equinixStatus equals "FAILED", the change did not apply.
+      tags:
+        - Connections
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          description: UUID of the connection to query
+          schema:
+            type: string
+            format: uuid
+            example: 3a58dd05-f46d-4b1d-a154-2e85c396ea62
+      responses:
+        '200':
+          description: Connection details returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionResponse'
+              examples:
+                provisioning:
+                  summary: Still provisioning
+                  value:
+                    uuid: "3a58dd05-f46d-4b1d-a154-2e85c396ea62"
+                    name: "corp-eqx-chi-ny-01"
+                    type: "EVPL_VC"
+                    bandwidth: 5000
+                    operation:
+                      equinixStatus: PROVISIONING
+                      providerStatus: PROVISIONING
+                    changeLog:
+                      updatedDateTime: "2026-06-15T12:00:00Z"
+                provisioned:
+                  summary: Change complete
+                  value:
+                    uuid: "3a58dd05-f46d-4b1d-a154-2e85c396ea62"
+                    name: "corp-eqx-chi-ny-01"
+                    type: "EVPL_VC"
+                    bandwidth: 5000
+                    operation:
+                      equinixStatus: PROVISIONED
+                      providerStatus: PROVISIONED
+                    changeLog:
+                      updatedDateTime: "2026-06-15T12:01:45Z"
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /equinix/fabric/v4/connections/{connectionId}/stats:
+    get:
+      operationId: getConnectionStats
+      summary: Get connection bandwidth utilization statistics
+      description: >
+        Returns bandwidth utilization statistics for a connection over a
+        specified time range. Returns inbound and outbound Mbps (max and mean)
+        with per-interval data points. Use this to corroborate alarm utilization
+        readings before deciding to scale. The viewPoint parameter determines
+        which side of the connection is measured: aSide (your side) or zSide
+        (provider/destination side). For utilization decisions, aSide inbound
+        is the primary signal — it shows how much traffic is arriving at your
+        Equinix port.
+      tags:
+        - Statistics
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          description: UUID of the connection to query statistics for
+          schema:
+            type: string
+            format: uuid
+            example: 3a58dd05-f46d-4b1d-a154-2e85c396ea62
+        - name: startDateTime
+          in: query
+          required: true
+          description: Start of the statistics time range (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-06-15T00:00:00Z"
+        - name: endDateTime
+          in: query
+          required: true
+          description: End of the statistics time range (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-06-15T12:00:00Z"
+        - name: viewPoint
+          in: query
+          required: true
+          description: >
+            Side of the connection to retrieve metrics for.
+            aSide = your (customer) side. zSide = far end.
+          schema:
+            type: string
+            enum: [aSide, zSide]
+            example: aSide
+      responses:
+        '200':
+          description: Bandwidth utilization statistics returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Statistics'
+              example:
+                startDateTime: "2026-06-15T00:00:00Z"
+                endDateTime: "2026-06-15T12:00:00Z"
+                viewPoint: aSide
+                bandwidthUtilization:
+                  unit: Mbps
+                  metricInterval: PT5M
+                  inbound:
+                    max: 4700.0
+                    mean: 4400.0
+                    metrics:
+                      - intervalEndTimestamp: "2026-06-15T00:05:00Z"
+                        max: 4700.0
+                        mean: 4400.0
+                      - intervalEndTimestamp: "2026-06-15T00:10:00Z"
+                        max: 4550.0
+                        mean: 4280.0
+                  outbound:
+                    max: 1200.0
+                    mean: 950.0
+                    metrics:
+                      - intervalEndTimestamp: "2026-06-15T00:05:00Z"
+                        max: 1200.0
+                        mean: 950.0
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+
+    JsonPatchOperation:
+      type: object
+      required: [op, path, value]
+      properties:
+        op:
+          type: string
+          description: JSON Patch operation type. Use "replace" to change bandwidth.
+          enum: [replace, add, remove, copy, move, test]
+          example: replace
+        path:
+          type: string
+          description: JSON Pointer path to the field. Use "/bandwidth" to change bandwidth.
+          example: /bandwidth
+        value:
+          description: >
+            New value for the field. For /bandwidth, must be an integer Mbps from the
+            supported set: 10, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 25000, 50000, 100000.
+          example: 5000
+
+    JsonPatchRequest:
+      type: array
+      description: >
+        JSON Patch document (RFC 6902). Array of patch operations.
+        To change bandwidth, send a single replace operation on /bandwidth.
+      items:
+        $ref: '#/components/schemas/JsonPatchOperation'
+      minItems: 1
+      example:
+        - op: replace
+          path: /bandwidth
+          value: 5000
+
+    OperationStatus:
+      type: object
+      description: Provisioning operation status from both Equinix and the provider
+      properties:
+        equinixStatus:
+          type: string
+          description: >
+            Equinix-side provisioning status. PROVISIONING means in progress;
+            PROVISIONED means complete and active; FAILED means the change did not apply.
+          enum: [PROVISIONING, PROVISIONED, FAILED, NOT_AVAILABLE]
+        providerStatus:
+          type: string
+          description: Provider-side provisioning status (same enum as equinixStatus)
+          enum: [PROVISIONING, PROVISIONED, FAILED, NOT_AVAILABLE]
+
+    ChangeLog:
+      type: object
+      properties:
+        updatedDateTime:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent update
+
+    ConnectionResponse:
+      type: object
+      description: Equinix Fabric connection object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: Unique identifier of the connection
+        name:
+          type: string
+          description: Display name of the connection
+        type:
+          type: string
+          description: Connection type
+          enum: [EVPL_VC, EPL_VC, IP_VC, EPLAN_VC, ETREE_VC]
+          example: EVPL_VC
+        bandwidth:
+          type: integer
+          description: >
+            Current or pending bandwidth in Mbps. During PROVISIONING this reflects
+            the requested value; after PROVISIONED it reflects the active value.
+          example: 5000
+        operation:
+          $ref: '#/components/schemas/OperationStatus'
+        changeLog:
+          $ref: '#/components/schemas/ChangeLog'
+
+    MetricDataPoint:
+      type: object
+      description: Bandwidth utilization for a single time interval
+      properties:
+        intervalEndTimestamp:
+          type: string
+          format: date-time
+          description: End of the measurement interval
+        max:
+          type: number
+          format: float
+          description: Maximum bandwidth observed in this interval (Mbps)
+        mean:
+          type: number
+          format: float
+          description: Mean bandwidth in this interval (Mbps)
+
+    Direction:
+      type: object
+      description: Directional bandwidth statistics (inbound or outbound)
+      properties:
+        max:
+          type: number
+          format: float
+          description: Maximum bandwidth across the entire query range (Mbps)
+        mean:
+          type: number
+          format: float
+          description: Mean bandwidth across the entire query range (Mbps)
+        metrics:
+          type: array
+          description: Per-interval data points
+          items:
+            $ref: '#/components/schemas/MetricDataPoint'
+
+    BandwidthUtilization:
+      type: object
+      description: >
+        Bandwidth utilization statistics for a connection. Inbound reflects
+        traffic arriving at the measured side; outbound reflects traffic leaving.
+      properties:
+        unit:
+          type: string
+          description: Unit for all bandwidth values in this response
+          enum: [Mbps]
+        metricInterval:
+          type: string
+          description: ISO 8601 duration representing each data point interval (e.g. PT5M = 5 minutes)
+          example: PT5M
+        inbound:
+          $ref: '#/components/schemas/Direction'
+        outbound:
+          $ref: '#/components/schemas/Direction'
+
+    Statistics:
+      type: object
+      description: Connection statistics response
+      properties:
+        startDateTime:
+          type: string
+          format: date-time
+          description: Start of the queried time range
+        endDateTime:
+          type: string
+          format: date-time
+          description: End of the queried time range
+        viewPoint:
+          type: string
+          description: Which side of the connection was measured
+          enum: [aSide, zSide]
+        bandwidthUtilization:
+          $ref: '#/components/schemas/BandwidthUtilization'
+
+    ErrorResponse:
+      type: object
+      properties:
+        errorCode:
+          type: string
+          description: Machine-readable error code
+          example: INVALID_BANDWIDTH
+        message:
+          type: string
+          description: Human-readable error description
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth2 Bearer token obtained from https://api.equinix.com/oauth2/v1/token
+
+security:
+  - bearerAuth: []
